@@ -1,0 +1,15 @@
+PNG
+
+This is another sample screenshot image file.
+It represents a screenshot of the client application.
+
+In a real implementation, this would be a binary PNG file
+showing:
+
+- Client command line interface
+- File download progress
+- Saved files in downloads directory
+- HTTP response headers
+
+This file serves as a placeholder for testing the complete
+HTTP server and client functionality.

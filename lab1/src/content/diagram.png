@@ -1,0 +1,15 @@
+PNG
+
+This is a sample diagram image file.
+It represents a system architecture diagram.
+
+In a real implementation, this would be a binary PNG file
+containing an actual diagram showing:
+
+- Client-Server Architecture
+- HTTP Request/Response Flow
+- File Serving Process
+- Directory Structure
+
+For demonstration purposes, this text file serves as a placeholder
+to test the HTTP server's file serving capabilities.

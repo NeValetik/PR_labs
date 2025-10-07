@@ -1,0 +1,15 @@
+PNG
+
+This is a sample screenshot image file.
+It represents a screenshot of the HTTP server in action.
+
+In a real implementation, this would be a binary PNG file
+showing:
+
+- Server console output
+- Browser displaying the website
+- File directory structure
+- Network traffic
+
+This file serves as a placeholder for testing nested directory
+serving capabilities of the HTTP server.
