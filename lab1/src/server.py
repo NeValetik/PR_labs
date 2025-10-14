@@ -1,193 +1,177 @@
-import socket
-import sys
+#import socket module
+from socket import *
+import sys # In order to terminate the program
 import os
 import mimetypes
-from urllib.parse import unquote
 
-def get_mime_type(filename):
-    """Get MIME type for a file"""
-    mime_type, _ = mimetypes.guess_type(filename)
-    if mime_type:
-        return mime_type
-    elif filename.lower().endswith('.pdf'):
-        return 'application/pdf'
-    elif filename.lower().endswith('.png'):
-        return 'image/png'
-    elif filename.lower().endswith('.html'):
-        return 'text/html'
-    else:
-        return 'application/octet-stream'
+def is_allowed_file_type(filename):
+    """Check if the file type is allowed (txt, png, html, md, pdf)"""
+    allowed_extensions = {'.txt', '.png', '.html', '.md', '.pdf'}
+    _, ext = os.path.splitext(filename.lower())
+    return ext in allowed_extensions
 
-def generate_directory_listing(directory_path, request_path):
+def generate_directory_listing(path, files, current_url):
     """Generate HTML directory listing"""
-    try:
-        items = os.listdir(directory_path)
-        items.sort()
-        
-        html = f"""<!DOCTYPE html>
+    html = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>Directory listing for {request_path}</title>
+    <title>Directory listing for /{path}</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 40px; }}
         h1 {{ color: #333; }}
         ul {{ list-style-type: none; padding: 0; }}
-        li {{ margin: 10px 0; }}
+        li {{ margin: 5px 0; }}
         a {{ text-decoration: none; color: #0066cc; }}
         a:hover {{ text-decoration: underline; }}
-        .directory {{ font-weight: bold; }}
+        .parent {{ font-weight: bold; color: #666; }}
     </style>
 </head>
 <body>
-    <h1>Directory listing for {request_path}</h1>
+    <h1>Directory listing for /{path}</h1>
     <ul>"""
-        
-        # Add parent directory link if not at root
-        if request_path != '/':
-            parent_path = '/'.join(request_path.rstrip('/').split('/')[:-1]) or '/'
-            html += f'        <li><a href="{parent_path}">.. (Parent Directory)</a></li>\n'
-        
-        for item in items:
-            item_path = os.path.join(directory_path, item)
-            if os.path.isdir(item_path):
-                html += f'        <li class="directory"><a href="{request_path.rstrip("/")}/{item}/">{item}/</a></li>\n'
-            else:
-                html += f'        <li><a href="{request_path.rstrip("/")}/{item}">{item}</a></li>\n'
-        
-        html += """    </ul>
+    
+    # Add parent directory link if not at root
+    if path and path != '.':
+        parent_url = '/'.join(current_url.rstrip('/').split('/')[:-1])
+        if parent_url:
+            parent_url += '/'
+        else:
+            parent_url = '/'
+        html += f'<li><a href="{parent_url}" class="parent">.. (Parent Directory)</a></li>'
+    
+    # Sort files and directories
+    files.sort()
+    directories = []
+    regular_files = []
+    
+    for file in files:
+        if os.path.isdir(os.path.join(path, file)):
+            directories.append(file)
+        else:
+            regular_files.append(file)
+    
+    # Add directories first
+    for directory in directories:
+        html += f'<li><a href="{current_url}{directory}/">{directory}/</a></li>'
+    
+    # Add files (only allowed file types)
+    for file in regular_files:
+        if is_allowed_file_type(file):
+            html += f'<li><a href="{current_url}{file}">{file}</a></li>'
+    
+    html += """</ul>
 </body>
 </html>"""
-        return html
-    except Exception as e:
-        return f"<html><body><h1>Error listing directory</h1><p>{str(e)}</p></body></html>"
+    return html
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python server.py <directory>")
-        print("Example: python server.py ./content")
-        sys.exit(1)
-    
-    serve_directory = sys.argv[1]
-    
-    if not os.path.isdir(serve_directory):
-        print(f"Error: Directory '{serve_directory}' does not exist")
-        sys.exit(1)
-    
-    serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    
+def send_response(connection_socket, content, content_type, is_binary=False):
+    """Send HTTP response with proper headers"""
+    if is_binary:
+        response = f'HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len(content)}\r\n\r\n'
+        connection_socket.send(response.encode())
+        connection_socket.send(content)
+    else:
+        response = f'HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len(content)}\r\n\r\n'
+        connection_socket.send(response.encode())
+        connection_socket.send(content.encode())
+    connection_socket.close()
+
+serverSocket = socket(AF_INET, SOCK_STREAM)
+#Prepare a sever socket
+#Fill in start
+serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+try:
+    serverSocket.bind(('0.0.0.0', 6789))
+    serverSocket.listen(1)
+    print("Server started on http://0.0.0.0:6789")
+    print("Accessible at http://localhost:6789")
+except OSError as e:
+    print(f"Error binding to port 6789: {e}")
+    print("Trying alternative port 8080...")
     try:
-        serverSocket.bind(('0.0.0.0', 6789))
+        serverSocket.bind(('0.0.0.0', 8080))
         serverSocket.listen(1)
-        print(f"Server started on http://0.0.0.0:6789")
-        print(f"Serving directory: {os.path.abspath(serve_directory)}")
-        print("Try: http://localhost:6789/")
-    except OSError as e:
-        print(f"Error binding to port 6789: {e}")
-        print("Trying alternative port 8080...")
-        try:
-            serverSocket.bind(('0.0.0.0', 8080))
-            serverSocket.listen(1)
-            print(f"Server started on http://0.0.0.0:8080")
-            print(f"Serving directory: {os.path.abspath(serve_directory)}")
-            print("Try: http://localhost:8080/")
-        except OSError as e2:
-            print(f"Error binding to port 8080: {e2}")
-            sys.exit(1)
+        print("Server started on http://0.0.0.0:8080")
+        print("Accessible at http://localhost:8080")
+    except OSError as e2:
+        print(f"Error binding to port 8080: {e2}")
+        sys.exit(1)
+#Fill in end
 
-    while True:
-        # Establish the connection
-        print('Ready to serve...')
-        connectionSocket, addr = serverSocket.accept()
-        print(f"Connection from {addr}")
+while True:
+    #Establish the connection
+    print('Ready to serve...')
+    connectionSocket, addr = serverSocket.accept()  #Fill in start #Fill in end
+    print(f"Connection from {addr}")
+    try:
+        message = connectionSocket.recv(1024).decode()  #Fill in start #Fill in end
+        print(f"Received request: {message[:100]}...")
+        filename = message.split()[1]
+        print(f"Requested path: {filename}")
         
-        try:
-            message = connectionSocket.recv(1024).decode()
-            print(f"Received request: {message[:100]}...")
-            
-            # Parse the request
-            request_lines = message.split('\n')
-            if not request_lines:
-                connectionSocket.close()
-                continue
-                
-            request_line = request_lines[0]
-            parts = request_line.split()
-            if len(parts) < 2:
-                connectionSocket.close()
-                continue
-                
-            method = parts[0]
-            path = unquote(parts[1])  # URL decode the path
-            
-            print(f"Requested path: {path}")
-            
-            # Handle directory requests
-            if path.endswith('/') or path == '/':
-                if path == '/':
-                    target_path = serve_directory
-                    request_path = '/'
-                else:
-                    target_path = os.path.join(serve_directory, path[1:])
-                    request_path = path
-                
-                if os.path.isdir(target_path):
-                    # Generate directory listing
-                    directory_html = generate_directory_listing(target_path, request_path)
-                    response = f"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {len(directory_html)}\r\n\r\n{directory_html}"
-                    connectionSocket.send(response.encode())
-                    print("Directory listing sent successfully")
-                else:
-                    # Directory not found
-                    error_html = "<html><body><h1>404 Not Found</h1><p>Directory not found</p></body></html>"
-                    response = f"HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: {len(error_html)}\r\n\r\n{error_html}"
-                    connectionSocket.send(response.encode())
-                    print("Directory not found - 404 sent")
-            else:
-                # Handle file requests
-                file_path = os.path.join(serve_directory, path[1:])
-                
-                if os.path.isfile(file_path):
-                    # File exists, serve it
-                    mime_type = get_mime_type(file_path)
-                    
-                    # Read file content
-                    if mime_type.startswith('text/') or mime_type == 'application/pdf':
-                        # Text files and PDFs - read as text
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            content = f.read()
-                        response = f"HTTP/1.1 200 OK\r\nContent-Type: {mime_type}\r\nContent-Length: {len(content.encode('utf-8'))}\r\n\r\n{content}"
-                        connectionSocket.send(response.encode())
-                    else:
-                        # Binary files - read as binary
-                        with open(file_path, 'rb') as f:
-                            content = f.read()
-                        response = f"HTTP/1.1 200 OK\r\nContent-Type: {mime_type}\r\nContent-Length: {len(content)}\r\n\r\n"
-                        connectionSocket.send(response.encode())
-                        connectionSocket.send(content)
-                    
-                    print(f"File sent successfully: {file_path}")
-                else:
-                    # File not found
-                    error_html = "<html><body><h1>404 Not Found</h1><p>File not found</p></body></html>"
-                    response = f"HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: {len(error_html)}\r\n\r\n{error_html}"
-                    connectionSocket.send(response.encode())
-                    print(f"File not found - 404 sent: {file_path}")
-            
+        # Remove leading slash and normalize path
+        path = filename[1:] if filename.startswith('/') else filename
+        
+        # Security: Prevent directory traversal attacks
+        if '..' in path or path.startswith('/'):
+            connectionSocket.sendall(b'HTTP/1.1 403 Forbidden\r\n\r\n')
             connectionSocket.close()
+            continue
             
-        except Exception as e:
-            print(f"Error handling request: {e}")
+        # If path is empty, default to current directory
+        if not path:
+            path = '.'
+            
+        # Handle directory requests
+        if os.path.isdir(path):
+            # If directory doesn't end with slash, redirect to add trailing slash
+            if not filename.endswith('/'):
+                redirect_url = filename + '/'
+                response = f'HTTP/1.1 301 Moved Permanently\r\nLocation: {redirect_url}\r\n\r\n'
+                connectionSocket.sendall(response.encode())
+                connectionSocket.close()
+                continue
+            
+            # Generate directory listing
             try:
-                error_html = "<html><body><h1>500 Internal Server Error</h1><p>Server error occurred</p></body></html>"
-                response = f"HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/html\r\nContent-Length: {len(error_html)}\r\n\r\n{error_html}"
-                connectionSocket.send(response.encode())
-            except:
-                pass
+                files = os.listdir(path)
+                html_content = generate_directory_listing(path, files, filename)
+                send_response(connectionSocket, html_content, 'text/html')
+                print("Directory listing sent successfully")
+            except PermissionError:
+                connectionSocket.sendall(b'HTTP/1.1 403 Forbidden\r\n\r\n')
+                connectionSocket.close()
+                
+        # Handle file requests
+        elif os.path.isfile(path):
+            # Check if file type is allowed
+            if not is_allowed_file_type(path):
+                connectionSocket.sendall(b'HTTP/1.1 404 Not Found\r\n\r\n')
+                connectionSocket.close()
+                continue
+                
+            try:
+                with open(path, 'rb') as f:
+                    content = f.read()
+                
+                # Determine content type
+                content_type, _ = mimetypes.guess_type(path)
+                if content_type is None:
+                    content_type = 'application/octet-stream'
+                
+                send_response(connectionSocket, content, content_type, is_binary=True)
+                print("File sent successfully")
+            except PermissionError:
+                connectionSocket.sendall(b'HTTP/1.1 403 Forbidden\r\n\r\n')
+                connectionSocket.close()
+        else:
+            connectionSocket.sendall(b'HTTP/1.1 404 Not Found\r\n\r\n')
             connectionSocket.close()
 
-    serverSocket.close()
-    sys.exit()
+    except Exception as e:
+        print(f"Error processing request: {e}")
+        connectionSocket.sendall(b'HTTP/1.1 500 Internal Server Error\r\n\r\n')
+        connectionSocket.close()
 
-if __name__ == "__main__":
-    main()
+serverSocket.close()
+sys.exit()#Terminate the program after sending the corresponding data

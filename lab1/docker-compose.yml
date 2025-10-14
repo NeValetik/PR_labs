@@ -4,7 +4,9 @@ services:
   web-server:
     build: .
     ports:
-      - "6789:6789"
+      - "0.0.0.0:6789:6789"  # Bind to all interfaces for external access
     volumes:
       - ./src/content:/lab1/src/content:ro
     restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1

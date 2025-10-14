@@ -1,131 +1,212 @@
-# HTTP File Server Lab
+# Web Server Lab Report
 
-This lab implements a comprehensive HTTP file server in Python using socket programming, with support for multiple file types, directory browsing, and nested directories.
+This lab implements a basic HTTP web server in Python using socket programming with Docker containerization.
 
-## Files
+## 1. Contents of Source Directory
 
-- `server.py` - The main web server implementation
-- `client.py` - HTTP client for testing the server
-- `content/` - Directory containing sample files to serve
-  - `index.html` - Main website with PDF collection
-  - `*.pdf` - Sample PDF documents
-  - `*.png` - Sample image files
-  - `books/` - Subdirectory with PDF books
-  - `images/` - Subdirectory with PNG images
+```
+src/
+├── client.py          # HTTP client for testing the server
+├── server.py          # Main web server implementation
+└── content/           # Directory served by the web server
+    ├── books/
+    │   ├── demian.pdf
+    │   ├── narcisus.pdf
+    │   └── drill/
+    │       └── deeper/
+    │           └── into/
+    │               └── core/
+    ├── cookies.png
+    ├── hello.html     # HTML file with embedded image
+    ├── images/
+    │   └── cookie.png
+    └── pdfs/
+        └── Lucrare de laborator nr. 2 Criptanaliza cifrurilor monoalfabetice (2).pdf
+```
 
-## Features
+<img src="./images/initialFolder.png" alt="Initial folder structure">
 
-### Server Features
-- **Command-line directory argument**: Server takes directory to serve as argument
-- **Multiple file type support**: HTML, PNG, PDF with proper MIME types
-- **Directory listing**: Automatic HTML generation for directory browsing
-- **Nested directory support**: Full support for subdirectories
-- **Error handling**: 404 for missing files, 500 for server errors
-- **Binary file support**: Proper handling of binary files (PNG, PDF)
+## 2. Docker Compose File
 
-### Client Features
-- **File type detection**: Automatically handles different file types
-- **HTML display**: Shows HTML content in terminal
-- **File download**: Saves PNG and PDF files to downloads directory
-- **HTTP response parsing**: Proper parsing of HTTP headers and body
-- **Error handling**: Displays appropriate error messages
+```yaml
+version: '3.8'
 
-## How to Run
+services:
+  web-server:
+    build: .
+    ports:
+      - "0.0.0.0:6789:6789"  # Bind to all interfaces for external access
+    volumes:
+      - ./src/content:/lab1/src/content:ro
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+```
 
-### 1. Start the Web Server
+## 3. Dockerfile
+
+```dockerfile
+FROM python:3.13-slim
+WORKDIR /lab1
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+RUN useradd -m labuser && chown -R labuser:labuser /lab1
+USER labuser
+
+EXPOSE 6789
+
+CMD ["python", "src/server.py"]
+```
+
+## 4. How to Start the Container
+
+To build and start the web server container:
 
 ```bash
-cd src
-python server.py ./content
+# Build and start the container
+docker compose up --build
+
+# Or run in detached mode
+docker compose up -d --build
 ```
 
-The server will start listening on port 6789 and serve files from the `content` directory.
+The server will be accessible at:
+- `http://localhost:6789`
+- `http://<network-ip>:6789` (external access)
 
-### 2. Test with a Browser
+## 5. Server Command with Directory Argument
 
-Open a web browser and navigate to:
-```
-http://localhost:6789/
-```
+The server runs with the following command inside the container:
 
-You should see the main website with directory listing.
-
-Browse to subdirectories:
-```
-http://localhost:6789/books/
-http://localhost:6789/images/
-```
-
-### 3. Test with the HTTP Client
-
-#### Download HTML files (displayed in terminal):
 ```bash
-python client.py localhost 6789 index.html
+python src/server.py
 ```
 
-#### Download PDF files (saved to downloads/):
-```bash
-python client.py localhost 6789 sample1.pdf
-python client.py localhost 6789 books/book1.pdf
-```
+The server automatically serves files from the `src/content` directory, which is mounted as a read-only volume in the container. The server accepts a directory path as an argument through the HTTP request URL.
 
-#### Download PNG files (saved to downloads/):
-```bash
-python client.py localhost 6789 logo.png
-python client.py localhost 6789 images/screenshot1.png
-```
+## 6. Contents of Served Directory
 
-## Directory Structure
+The web server serves files from the `src/content` directory:
 
 ```
 content/
-├── index.html          # Main website
-├── sample1.pdf         # Sample PDF document
-├── manual.pdf           # Technical manual
-├── research.pdf        # Research paper
-├── logo.png           # Company logo
-├── diagram.png        # System diagram
-├── books/             # Subdirectory with books
-│   ├── book1.pdf
-│   └── book2.pdf
-└── images/            # Subdirectory with images
-    ├── screenshot1.png
-    └── screenshot2.png
+├── books/                    
+│   ├── demian.pdf          # PDF file
+│   ├── narcisus.pdf        # PDF file  
+│   └── drill/              # Nested subdirectory
+│       └── deeper/
+│           └── into/
+│               └── core/
+├── cookies.png            
+├── hello.html             
+├── images/                 # Images subdirectory
+│   └── cookie.png         # PNG image file
+└── pdfs/                   
+    └── Lucrare de laborator nr. 2 Criptanaliza cifrurilor monoalfabetice (2).pdf
 ```
 
-## Advanced Features
+## 7. Browser Requests for 4 Different File Types
 
-### Directory Listing
-- Automatic HTML generation for directory browsing
-- Styled with CSS for better presentation
-- Parent directory navigation
-- File type indicators
+### 7.1 Inexistent File (404 Error)
+**URL:** `http://localhost:6789/nonexistent.html`
 
-### MIME Type Support
-- `text/html` for HTML files
-- `image/png` for PNG images
-- `application/pdf` for PDF documents
-- Proper Content-Type headers
+**Expected Response:**
+```
+HTTP/1.1 404 Not Found
+```
 
-### Error Handling
-- 404 Not Found for missing files/directories
-- 500 Internal Server Error for server issues
-- Proper HTTP status codes and error pages
+### 7.2 HTML File with Image
+**URL:** `http://localhost:6789/hello.html`
 
-## Testing Scenarios
+**Content:** HTML file that includes an embedded image reference:
+```html
+<!DOCTYPE html>
+<html>
+<body>
+<h1>My First Heading</h1>
+<p>My first paragraph.</p>
+<div>these are cookies:</div>
+<img src="./cookies.png" alt="Cookie" />
+</body>
+</html>
+```
 
-1. **Basic file serving**: Access individual files directly
-2. **Directory browsing**: Navigate through directories
-3. **Nested directories**: Test subdirectory functionality
-4. **File downloads**: Use client to download different file types
-5. **Error handling**: Test with non-existent files
-6. **Network testing**: Test with friends on local network
+<img src="./images/HtmlFile.png" alt="HTML file displayed in browser">
 
-## Implementation Details
+### 7.3 PDF File
+**URL:** `http://localhost:6789/books/demian.pdf`
 
-- **Socket programming**: Uses Python's socket module
-- **HTTP parsing**: Manual HTTP request/response parsing
-- **File handling**: Binary and text file support
-- **URL decoding**: Proper handling of URL-encoded paths
-- **MIME types**: Automatic content type detection
-- **Error pages**: HTML error pages for better user experience
+**Response:** Serves the PDF file with proper `Content-Type: application/pdf` header.
+
+<img src="./images/bookPdf.png" alt="PDF file displayed in browser">
+
+### 7.4 PNG File
+**URL:** `http://localhost:6789/cookies.png`
+
+**Response:** Serves the PNG image file with proper `Content-Type: image/png` header.
+
+<img src="./images/pngFile.png" alt="PNG image displayed in browser">
+
+## 8. Client Usage
+
+### How to Run the Client
+
+```bash
+# From the host machine (outside container)
+python src/client.py localhost 6789 hello.html
+
+# Or from inside the container
+docker-compose exec web-server python src/client.py localhost 6789 hello.html
+```
+
+### Example Client Output
+<img src="./images/clientRequest.png">
+
+### Saved Files
+The client displays the server response in the terminal. To save files, you can redirect the output:
+
+```bash
+python src/client.py localhost 6789 hello.html > saved_response.html
+```
+<img src="./images/savedResponse.png">
+
+## 9. Directory Listing Functionality
+
+The server generates HTML directory listings for directory requests:
+
+### Directory Listing Example
+**URL:** `http://localhost:6789/books/`
+
+<img src="./images/booksDirectory.png" alt="Directory listing displayed in browser">
+
+**Generated HTML:**
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Directory listing for /books</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        h1 { color: #333; }
+        ul { list-style-type: none; padding: 0; }
+        li { margin: 5px 0; }
+        a { text-decoration: none; color: #0066cc; }
+        a:hover { text-decoration: underline; }
+        .parent { font-weight: bold; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>Directory listing for /books</h1>
+    <ul>
+        <li><a href="/" class="parent">.. (Parent Directory)</a></li>
+        <li><a href="/books/drill/">drill/</a></li>
+        <li><a href="/books/demian.pdf">demian.pdf</a></li>
+        <li><a href="/books/narcisus.pdf">narcisus.pdf</a></li>
+    </ul>
+</body>
+</html>
+```
