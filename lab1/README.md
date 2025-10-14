@@ -214,3 +214,17 @@ The server generates HTML directory listings for directory requests:
 </body>
 </html>
 ```
+
+## 10. Browsing friends(mine) site on the network
+
+Can't browse the friends site, so browsed mine from another device.
+
+I use the cmd command ipconfig to get the current ip on the network
+<img src="./images/command.png">
+<img src="./images/ipconfig.png">
+
+And this is what I browsed on the another PC on same network:
+<img src="./images/friendPc.png">
+<img src="./images/friendPcBooks.png">
+
+
