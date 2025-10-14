@@ -1,4 +1,7 @@
-# Web Server Lab Report
+## PR LAB 1
+### Vitcovschii Vladimir FAF-231
+
+## Web Server Lab Report
 
 This lab implements a basic HTTP web server in Python using socket programming with Docker containerization.
 
@@ -76,6 +79,7 @@ docker compose up -d --build
 
 The server will be accessible at:
 - `http://localhost:6789`
+- `http://0.0.0.0:6789`
 - `http://<network-ip>:6789` (external access)
 
 ## 5. Server Command with Directory Argument
