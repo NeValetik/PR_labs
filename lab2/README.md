@@ -5,36 +5,6 @@
 
 This lab implements a multithreaded HTTP web server in Python with advanced features including request counters, rate limiting, and thread-safe operations.
 
-## Lab 2: Concurrent HTTP Server - Task Description
-
-### Theoretical Background
-
-This lab focuses on understanding and implementing concurrency in web servers. The lab is based on the following resources:
-- [MIT 6.102 Concurrency Introduction](https://web.mit.edu/6.102/www/sp25/classes/14-concurrency/)
-- Section 4.3 from the concurrency article
-- Definitions from the concurrency glossary
-- (Optional) The Art of Multiprocessor Programming
-
-### Important Note on Concurrency Definitions
-
-There are two "correct" definitions of concurrency depending on the school of thought:
-
-**OS (Low-level) Tradition:**
-- **Concurrency** = tasks overlap in time (including by interleaving)
-- **Parallelism** = tasks run simultaneously (on multiple processors)
-- Parallel implies Concurrent
-- All parallel tasks are also concurrent
-- Not all concurrent tasks are parallel
-
-**PLT (High-level) Tradition:**
-- **Concurrency** is a language concept: constructing a program as independent parts
-- **Parallelism** is a hardware concept: executing computations on multiple processors simultaneously
-- Parallelism and Concurrency are orthogonal
-- A concurrent program may or may not execute in parallel
-- A parallel computation may or may not have the notion of concurrency in its structure
-
-The high-level view of concurrency is becoming more predominant, and this lab follows the second school of thought.
-
 ### Lab Tasks
 
 #### 1. Multithreaded Server Implementation
@@ -123,8 +93,6 @@ src/
     └── pdfs/
         └── Lucrare de laborator nr. 2 Criptanaliza cifrurilor monoalfabetice (2).pdf
 ```
-
-<img src="./images/initialFolder.png" alt="Initial folder structure">
 
 ## 2. Docker Compose File
 
