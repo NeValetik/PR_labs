@@ -78,11 +78,11 @@ def demonstrate_race_condition(server_host, server_port, filename, num_requests=
     print(f"Total time: {total_time:.2f} seconds")
     
     if naive_counter < num_requests:
-        print(f"\n⚠️  RACE CONDITION DETECTED!")
+        print(f"\n RACE CONDITION DETECTED!")
         print(f"   Expected: {num_requests}, Got: {naive_counter}")
         print(f"   Lost {num_requests - naive_counter} increments due to race condition")
     else:
-        print(f"\n✅ No race condition detected (lucky timing)")
+        print(f"\n No race condition detected (lucky timing)")
 
 def main():
     if len(sys.argv) < 2:

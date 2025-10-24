@@ -39,7 +39,6 @@ def generate_directory_listing(path, files, current_url):
             parent_url = '/'
         html += f'<li><a href="{parent_url}" class="parent">.. (Parent Directory)</a></li>'
     
-    # Sort files and directories
     files.sort()
     directories = []
     regular_files = []
@@ -50,11 +49,9 @@ def generate_directory_listing(path, files, current_url):
         else:
             regular_files.append(file)
     
-    # Add directories first
     for directory in directories:
         html += f'<li><a href="{current_url}{directory}/">{directory}/</a></li>'
     
-    # Add files (only allowed file types)
     for file in regular_files:
         if is_allowed_file_type(file):
             html += f'<li><a href="{current_url}{file}">{file}</a></li>'
@@ -65,7 +62,6 @@ def generate_directory_listing(path, files, current_url):
     return html
 
 def send_response(connection_socket, content, content_type, is_binary=False):
-    """Send HTTP response with proper headers"""
     if is_binary:
         response = f'HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len(content)}\r\n\r\n'
         connection_socket.send(response.encode())
@@ -77,8 +73,6 @@ def send_response(connection_socket, content, content_type, is_binary=False):
     connection_socket.close()
 
 serverSocket = socket(AF_INET, SOCK_STREAM)
-#Prepare a sever socket
-#Fill in start
 serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 try:
     serverSocket.bind(('0.0.0.0', 6789))
