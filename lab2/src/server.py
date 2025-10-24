@@ -7,16 +7,15 @@ import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
+import queue
 
-# Global variables for request counting and rate limiting
-request_counters = defaultdict(int)  # File path -> count
-request_counters_lock = threading.Lock()  # Lock for thread-safe access
-
-# Rate limiting: IP -> list of request timestamps
-client_requests = defaultdict(list)
-rate_limit_lock = threading.Lock()
-RATE_LIMIT = 5  # requests per second
-RATE_WINDOW = 1  # time window in seconds
+# Global variables for thread-safe operations
+request_counters = defaultdict(int)  # Track requests per file
+counter_lock = threading.Lock()  # Lock for counter operations
+rate_limit_data = defaultdict(list)  # Track request timestamps per IP
+rate_limit_lock = threading.Lock()  # Lock for rate limiting
+RATE_LIMIT_REQUESTS = 5  # Max requests per second
+RATE_LIMIT_WINDOW = 1  # Time window in seconds
 
 def is_allowed_file_type(filename):
     """Check if the file type is allowed (txt, png, html, md, pdf)"""
@@ -25,26 +24,31 @@ def is_allowed_file_type(filename):
     return ext in allowed_extensions
 
 def check_rate_limit(client_ip):
-    """Check if client is within rate limit (thread-safe)"""
+    """Check if client IP is within rate limit (thread-safe)"""
     current_time = time.time()
     
     with rate_limit_lock:
-        # Clean old requests outside the time window
-        client_requests[client_ip] = [
-            req_time for req_time in client_requests[client_ip]
-            if current_time - req_time < RATE_WINDOW
+        # Clean old timestamps (older than RATE_LIMIT_WINDOW seconds)
+        rate_limit_data[client_ip] = [
+            timestamp for timestamp in rate_limit_data[client_ip]
+            if current_time - timestamp < RATE_LIMIT_WINDOW
         ]
         
         # Check if under rate limit
-        if len(client_requests[client_ip]) >= RATE_LIMIT:
+        if len(rate_limit_data[client_ip]) < RATE_LIMIT_REQUESTS:
+            rate_limit_data[client_ip].append(current_time)
+            return True
+        else:
             return False
-        
-        # Add current request
-        client_requests[client_ip].append(current_time)
-        return True
+
+def increment_counter(filename):
+    """Increment request counter for a file (thread-safe)"""
+    with counter_lock:
+        request_counters[filename] += 1
+        return request_counters[filename]
 
 def generate_directory_listing(path, files, current_url):
-    """Generate HTML directory listing with request counters"""
+    """Generate HTML directory listing"""
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -57,7 +61,6 @@ def generate_directory_listing(path, files, current_url):
         a {{ text-decoration: none; color: #0066cc; }}
         a:hover {{ text-decoration: underline; }}
         .parent {{ font-weight: bold; color: #666; }}
-        .counter {{ color: #666; font-size: 0.9em; }}
     </style>
 </head>
 <body>
@@ -88,37 +91,53 @@ def generate_directory_listing(path, files, current_url):
     for directory in directories:
         html += f'<li><a href="{current_url}{directory}/">{directory}/</a></li>'
     
-    # Add files (only allowed file types) with request counters
+    # Add files (only allowed file types)
     for file in regular_files:
         if is_allowed_file_type(file):
-            file_path = f"{current_url}{file}".lstrip('/')
-            with request_counters_lock:
-                count = request_counters[file_path]
-            html += f'<li><a href="{current_url}{file}">{file}</a> <span class="counter">({count} requests)</span></li>'
+            # Get request count for this file
+            with counter_lock:
+                count = request_counters.get(f"/{file}", 0)
+            html += f'<li><a href="{current_url}{file}">{file}</a> <span style="color: #666; font-size: 0.9em;">({count} requests)</span></li>'
     
     html += """</ul>
 </body>
 </html>"""
     return html
 
+def send_response(connection_socket, content, content_type, is_binary=False):
+    """Send HTTP response with proper headers"""
+    if is_binary:
+        response = f'HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len(content)}\r\n\r\n'
+        connection_socket.send(response.encode())
+        connection_socket.send(content)
+    else:
+        response = f'HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len(content)}\r\n\r\n'
+        connection_socket.send(response.encode())
+        connection_socket.send(content.encode())
+    connection_socket.close()
+
 def handle_request(connection_socket, addr):
-    """Handle a single client request in a separate thread"""
+    """Handle a single client request (thread-safe)"""
+    client_ip = addr[0]
+    
     try:
-        message = connection_socket.recv(1024).decode()
-        print(f"Received request from {addr}: {message[:100]}...")
-        
-        # Extract client IP for rate limiting
-        client_ip = addr[0]
-        
-        # Check rate limit
+        # Check rate limiting
         if not check_rate_limit(client_ip):
             print(f"Rate limit exceeded for {client_ip}")
             connection_socket.sendall(b'HTTP/1.1 429 Too Many Requests\r\n\r\n')
             connection_socket.close()
             return
         
+        message = connection_socket.recv(1024).decode()
+        print(f"Received request from {client_ip}: {message[:100]}...")
         filename = message.split()[1]
         print(f"Requested path: {filename}")
+        
+        # Add 1 second delay to simulate work
+        time.sleep(1)
+        
+        # Increment counter for this request
+        increment_counter(filename)
         
         # Remove leading slash and normalize path
         path = filename[1:] if filename.startswith('/') else filename
@@ -132,14 +151,6 @@ def handle_request(connection_socket, addr):
         # If path is empty, default to current directory
         if not path:
             path = '.'
-        
-        # Increment request counter (thread-safe)
-        with request_counters_lock:
-            request_counters[path] += 1
-            print(f"Request counter for {path}: {request_counters[path]}")
-        
-        # Add delay to simulate work (~1s)
-        time.sleep(1)
             
         # Handle directory requests
         if os.path.isdir(path):
@@ -188,24 +199,9 @@ def handle_request(connection_socket, addr):
             connection_socket.close()
 
     except Exception as e:
-        print(f"Error processing request from {addr}: {e}")
-        try:
-            connection_socket.sendall(b'HTTP/1.1 500 Internal Server Error\r\n\r\n')
-        except:
-            pass
+        print(f"Error processing request from {client_ip}: {e}")
+        connection_socket.sendall(b'HTTP/1.1 500 Internal Server Error\r\n\r\n')
         connection_socket.close()
-
-def send_response(connection_socket, content, content_type, is_binary=False):
-    """Send HTTP response with proper headers"""
-    if is_binary:
-        response = f'HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len(content)}\r\n\r\n'
-        connection_socket.send(response.encode())
-        connection_socket.send(content)
-    else:
-        response = f'HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len(content)}\r\n\r\n'
-        connection_socket.send(response.encode())
-        connection_socket.send(content.encode())
-    connection_socket.close()
 
 serverSocket = socket(AF_INET, SOCK_STREAM)
 #Prepare a sever socket
@@ -229,24 +225,19 @@ except OSError as e:
         sys.exit(1)
 #Fill in end
 
-print("Concurrent HTTP Server with Rate Limiting and Request Counters")
-print("Rate limit: 5 requests/second per IP")
-print("Request counters are thread-safe with locks")
+print("Multithreaded server ready to serve...")
+print("Features: Request counters, Rate limiting (5 req/sec), 1s delay simulation")
 
 while True:
-    # Establish the connection
+    #Establish the connection
     print('Ready to serve...')
-    connectionSocket, addr = serverSocket.accept()
+    connectionSocket, addr = serverSocket.accept()  #Fill in start #Fill in end
     print(f"Connection from {addr}")
     
-    # Create a new thread for each request
-    client_thread = threading.Thread(
-        target=handle_request,
-        args=(connectionSocket, addr),
-        daemon=True
-    )
-    client_thread.start()
-    print(f"Started thread for client {addr}")
+    # Create a new thread to handle the request
+    thread = threading.Thread(target=handle_request, args=(connectionSocket, addr))
+    thread.daemon = True  # Allow main thread to exit even if threads are running
+    thread.start()
 
 serverSocket.close()
 sys.exit()#Terminate the program after sending the corresponding data

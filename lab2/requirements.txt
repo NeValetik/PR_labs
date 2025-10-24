@@ -5,7 +5,3 @@
 # - os
 # - mimetypes
 # - urllib.parse
-# - threading
-# - time
-# - collections
-# - datetime

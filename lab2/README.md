@@ -1,18 +1,113 @@
-## PR LAB 2 - Concurrent HTTP Server
+## PR LAB 2
 ### Vitcovschii Vladimir FAF-231
 
-## Concurrent HTTP Server Lab Report
+## Multithreaded Web Server Lab Report
 
-This lab implements a concurrent HTTP web server in Python using socket programming with threading, rate limiting, and request counting. The server can handle multiple connections simultaneously and includes thread-safe request counters and IP-based rate limiting.
+This lab implements a multithreaded HTTP web server in Python with advanced features including request counters, rate limiting, and thread-safe operations.
+
+## Lab 2: Concurrent HTTP Server - Task Description
+
+### Theoretical Background
+
+This lab focuses on understanding and implementing concurrency in web servers. The lab is based on the following resources:
+- [MIT 6.102 Concurrency Introduction](https://web.mit.edu/6.102/www/sp25/classes/14-concurrency/)
+- Section 4.3 from the concurrency article
+- Definitions from the concurrency glossary
+- (Optional) The Art of Multiprocessor Programming
+
+### Important Note on Concurrency Definitions
+
+There are two "correct" definitions of concurrency depending on the school of thought:
+
+**OS (Low-level) Tradition:**
+- **Concurrency** = tasks overlap in time (including by interleaving)
+- **Parallelism** = tasks run simultaneously (on multiple processors)
+- Parallel implies Concurrent
+- All parallel tasks are also concurrent
+- Not all concurrent tasks are parallel
+
+**PLT (High-level) Tradition:**
+- **Concurrency** is a language concept: constructing a program as independent parts
+- **Parallelism** is a hardware concept: executing computations on multiple processors simultaneously
+- Parallelism and Concurrency are orthogonal
+- A concurrent program may or may not execute in parallel
+- A parallel computation may or may not have the notion of concurrency in its structure
+
+The high-level view of concurrency is becoming more predominant, and this lab follows the second school of thought.
+
+### Lab Tasks
+
+#### 1. Multithreaded Server Implementation
+**Objective:** Make the HTTP server multithreaded to handle multiple connections concurrently.
+
+**Requirements:**
+- Implement either thread-per-request or thread pool approach
+- Add a delay to the request handler to simulate work (~1s)
+- Test with 10 concurrent requests and measure handling time
+- Compare performance with single-threaded server from previous lab
+
+#### 2. Request Counter Feature (2 points)
+**Objective:** Record the number of requests made to each file and display in directory listing.
+
+**Implementation Steps:**
+1. **Naive Implementation:** Implement counter without synchronization
+2. **Race Condition Demonstration:** Show race condition by adding delays to force thread interleaving
+3. **Thread-Safe Implementation:** Use synchronization mechanism (e.g., locks) to eliminate race conditions
+4. **Directory Listing Integration:** Display request counts in directory listings
+
+**Example Output:**
+```
+README.md (5 requests)
+books/demian.pdf (12 requests)
+```
+
+#### 3. Rate Limiting Implementation (2 points)
+**Objective:** Implement thread-safe rate limiting by client IP (~5 requests/second).
+
+**Requirements:**
+- Rate limit of approximately 5 requests per second per client IP
+- Thread-safe implementation
+- Test with two scenarios:
+  - One friend spamming requests (should be rate-limited)
+  - Another friend sending requests just below the rate limit (should succeed)
+- Compare throughput for both scenarios (successful requests/second)
+
+**Expected Behavior:**
+- Spam requests should receive HTTP 429 (Too Many Requests) responses
+- Normal requests should be processed successfully
+- Rate limiting should be enforced per IP address
+- Thread-safe implementation to prevent race conditions
+
+### Performance Testing Requirements
+
+#### Concurrent Request Testing
+- Make 10 concurrent requests to both servers
+- Measure total time for all requests to complete
+- Compare multithreaded vs single-threaded performance
+- Expected: Multithreaded should handle requests in ~1-2 seconds, single-threaded in ~10+ seconds
+
+#### Race Condition Testing
+- Demonstrate naive counter implementation without synchronization
+- Show lost increments due to thread interference
+- Implement thread-safe solution with locks
+- Verify race condition elimination
+
+#### Rate Limiting Testing
+- Test with aggressive client (spam requests)
+- Test with normal client (below rate limit)
+- Measure successful requests per second for each scenario
+- Verify HTTP 429 responses for rate-limited requests
 
 ## 1. Contents of Source Directory
 
 ```
 src/
 ├── client.py                    # HTTP client for testing the server
-├── server.py                    # Concurrent HTTP server implementation
+├── server.py                    # Multithreaded web server implementation
+├── server_single_threaded.py   # Single-threaded server for comparison
 ├── concurrent_test.py           # Test script for concurrent requests
-├── race_condition_demo.py      # Demonstration of race conditions and fixes
+├── race_condition_demo.py       # Demonstrates race conditions
+├── rate_limit_test.py          # Tests rate limiting functionality
 └── content/                     # Directory served by the web server
     ├── books/
     │   ├── demian.pdf
@@ -22,7 +117,7 @@ src/
     │           └── into/
     │               └── core/
     ├── cookies.png
-    ├── hello.html     # HTML file with embedded image
+    ├── README.md     # HTML file with embedded image
     ├── images/
     │   └── cookie.png
     └── pdfs/
@@ -31,31 +126,7 @@ src/
 
 <img src="./images/initialFolder.png" alt="Initial folder structure">
 
-## 2. Concurrent Server Features
-
-### 2.1 Threading
-- Each client request is handled in a separate thread
-- Server can handle multiple concurrent connections
-- Uses daemon threads for automatic cleanup
-
-### 2.2 Request Counters
-- Thread-safe request counting for each file
-- Uses locks to prevent race conditions
-- Counters displayed in directory listings
-- Demonstrates synchronization mechanisms
-
-### 2.3 Rate Limiting
-- IP-based rate limiting (5 requests/second per IP)
-- Thread-safe implementation using locks
-- Returns HTTP 429 (Too Many Requests) when limit exceeded
-- Automatic cleanup of old request timestamps
-
-### 2.4 Performance Testing
-- Test script for concurrent request measurement
-- Comparison between single-threaded and multi-threaded performance
-- Rate limiting demonstration
-
-## 3. Docker Compose File
+## 2. Docker Compose File
 
 ```yaml
 version: '3.8'
@@ -91,240 +162,78 @@ EXPOSE 6789
 CMD ["python", "src/server.py"]
 ```
 
-## 4. How to Start the Container
+### 4. Multithreading Implementation
 
-To build and start the web server container:
+The server now uses threading to handle multiple concurrent connections:
+
+```python
+# Create a new thread to handle the request
+thread = threading.Thread(target=handle_request, args=(connectionSocket, addr))
+thread.daemon = True  # Allow main thread to exit even if threads are running
+thread.start()
+```
+
+
+### 5. Request Counter Feature
+
+The server tracks the number of requests made to each file and displays them in directory listings:
+
+<img src="./images/countTheRequests.png" alt="Directory listing showing request counters for each file">
+
+### 6. Rate Limiting Implementation
+
+Thread-safe rate limiting by client IP:
+
+```python
+def check_rate_limit(client_ip):
+    current_time = time.time()
+    
+    with rate_limit_lock:
+        # Clean old timestamps
+        rate_limit_data[client_ip] = [
+            timestamp for timestamp in rate_limit_data[client_ip]
+            if current_time - timestamp < RATE_LIMIT_WINDOW
+        ]
+        
+        # Check if under rate limit (5 requests/second)
+        if len(rate_limit_data[client_ip]) < RATE_LIMIT_REQUESTS:
+            rate_limit_data[client_ip].append(current_time)
+            return True
+        else:
+            return False
+```
+
+<img src="./images/dockerMultiThreadServer.png" alt="Docker multithreaded server running with rate limiting">
+
+#### Rate Limiting Testing
 
 ```bash
-# Build and start the container
-docker compose up --build
-
-# Or run in detached mode
-docker compose up -d --build
+python src/rate_limit_test.py localhost 6789 README.md
 ```
 
-The server will be accessible at:
-- `http://localhost:6789`
-- `http://0.0.0.0:6789`
-- `http://<network-ip>:6789` (external access)
+<img src="./images/rateLimited.png" alt="Rate limiting test showing spam client being blocked">
+<img src="./images/rateLimitingResult.png" alt="Rate limiting results showing throughput comparison">
 
-## 5. Server Command with Directory Argument
 
-The server runs with the following command inside the container:
+### Single threaded and multithreaded comparison
+
+<img src="./images/singleConcurrent.png">
+<img src="./images/multiConcurrent.png">
+
+#### Running Tests
 
 ```bash
-python src/server.py
+# Performance comparison
+python src/concurrent_test.py multithreaded localhost 6789 README.md
+python src/concurrent_test.py single localhost 8080 README.md
+
+# Race condition demonstration
+python src/race_condition_demo.py localhost 6789 README.md
+
+# Rate limiting tests
+python src/rate_limit_test.py localhost 6789 README.md
 ```
 
-The server automatically serves files from the `src/content` directory, which is mounted as a read-only volume in the container. The server accepts a directory path as an argument through the HTTP request URL.
 
-## 6. Contents of Served Directory
-
-The web server serves files from the `src/content` directory:
-
-```
-content/
-├── books/                    
-│   ├── demian.pdf          # PDF file
-│   ├── narcisus.pdf        # PDF file  
-│   └── drill/              # Nested subdirectory
-│       └── deeper/
-│           └── into/
-│               └── core/
-├── cookies.png            
-├── hello.html             
-├── images/                 # Images subdirectory
-│   └── cookie.png         # PNG image file
-└── pdfs/                   
-    └── Lucrare de laborator nr. 2 Criptanaliza cifrurilor monoalfabetice (2).pdf
-```
-
-## 7. Browser Requests for 4 Different File Types
-
-### 7.1 Inexistent File (404 Error)
-**URL:** `http://localhost:6789/nonexistent.html`
-
-**Expected Response:**
-```
-HTTP/1.1 404 Not Found
-```
-
-### 7.2 HTML File with Image
-**URL:** `http://localhost:6789/hello.html`
-
-**Content:** HTML file that includes an embedded image reference:
-```html
-<!DOCTYPE html>
-<html>
-<body>
-<h1>My First Heading</h1>
-<p>My first paragraph.</p>
-<div>these are cookies:</div>
-<img src="./cookies.png" alt="Cookie" />
-</body>
-</html>
-```
-
-<img src="./images/HtmlFile.png" alt="HTML file displayed in browser">
-
-### 7.3 PDF File
-**URL:** `http://localhost:6789/books/demian.pdf`
-
-**Response:** Serves the PDF file with proper `Content-Type: application/pdf` header.
-
-<img src="./images/bookPdf.png" alt="PDF file displayed in browser">
-
-### 7.4 PNG File
-**URL:** `http://localhost:6789/cookies.png`
-
-**Response:** Serves the PNG image file with proper `Content-Type: image/png` header.
-
-<img src="./images/pngFile.png" alt="PNG image displayed in browser">
-
-## 8. Client Usage
-
-### How to Run the Client
-
-```bash
-# From the host machine (outside container)
-python src/client.py localhost 6789 hello.html
-
-# Or from inside the container
-docker-compose exec web-server python src/client.py localhost 6789 hello.html
-```
-
-### Example Client Output
-<img src="./images/clientRequest.png">
-
-### Saved Files
-The client displays the server response in the terminal. To save files, you can redirect the output:
-
-```bash
-python src/client.py localhost 6789 hello.html > saved_response.html
-```
-<img src="./images/savedResponse.png">
-
-## 9. Directory Listing Functionality
-
-The server generates HTML directory listings for directory requests:
-
-### Directory Listing Example
-**URL:** `http://localhost:6789/books/`
-
-<img src="./images/booksDirectory.png" alt="Directory listing displayed in browser">
-
-**Generated HTML:**
-```html
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Directory listing for /books</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        h1 { color: #333; }
-        ul { list-style-type: none; padding: 0; }
-        li { margin: 5px 0; }
-        a { text-decoration: none; color: #0066cc; }
-        a:hover { text-decoration: underline; }
-        .parent { font-weight: bold; color: #666; }
-    </style>
-</head>
-<body>
-    <h1>Directory listing for /books</h1>
-    <ul>
-        <li><a href="/" class="parent">.. (Parent Directory)</a></li>
-        <li><a href="/books/drill/">drill/</a></li>
-        <li><a href="/books/demian.pdf">demian.pdf</a></li>
-        <li><a href="/books/narcisus.pdf">narcisus.pdf</a></li>
-    </ul>
-</body>
-</html>
-```
-
-## 10. Testing Concurrent Server
-
-### 10.1 Concurrent Request Testing
-Test the server's ability to handle multiple concurrent requests:
-
-```bash
-# Test 10 concurrent requests
-python src/concurrent_test.py localhost 6789 hello.html 10
-
-# Test rate limiting (6 requests/second, above the 5 req/s limit)
-python src/concurrent_test.py localhost 6789 hello.html 6
-```
-
-### 10.2 Race Condition Demonstration
-Demonstrate race conditions and their fixes:
-
-```bash
-# Run race condition demonstration
-python src/race_condition_demo.py
-```
-
-This script shows:
-- Unsafe counter implementation (race condition)
-- Safe counter implementation with locks
-- Comparison of results
-
-### 10.3 Performance Comparison
-Compare single-threaded vs multi-threaded performance:
-
-1. **Single-threaded server** (from Lab 1):
-   - 10 requests × 1 second delay = ~10 seconds total
-   - Sequential processing
-
-2. **Multi-threaded server** (Lab 2):
-   - 10 requests × 1 second delay = ~1 second total
-   - Concurrent processing
-   - Significant performance improvement
-
-## 11. Rate Limiting Demonstration
-
-### 11.1 Normal Usage (Under Rate Limit)
-```bash
-# Send 3 requests per second (under 5 req/s limit)
-for i in {1..3}; do
-  python src/client.py localhost 6789 hello.html &
-  sleep 0.3
-done
-```
-
-### 11.2 Rate Limiting (Over Rate Limit)
-```bash
-# Send 10 requests rapidly (over 5 req/s limit)
-for i in {1..10}; do
-  python src/client.py localhost 6789 hello.html &
-done
-```
-
-Expected results:
-- First 5 requests: HTTP 200 OK
-- Remaining requests: HTTP 429 Too Many Requests
-
-## 12. Request Counter Feature
-
-The server now displays request counters in directory listings:
-
-```html
-<li><a href="/hello.html">hello.html</a> <span class="counter">(5 requests)</span></li>
-```
-
-Counters are:
-- Thread-safe (using locks)
-- Persistent during server runtime
-- Reset when server restarts
-
-## 13. Browsing friends(mine) site on the network
-
-Can't browse the friends site, so browsed mine from another device.
-
-I use the cmd command ipconfig to get the current ip on the network
-<img src="./images/command.png">
-<img src="./images/ipconfig.png">
-
-And this is what I browsed on the another PC on same network:
-<img src="./images/friendPc.png">
-<img src="./images/friendPcBooks.png">
 
 

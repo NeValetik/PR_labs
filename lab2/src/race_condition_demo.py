@@ -1,149 +1,110 @@
 #!/usr/bin/env python3
 
+import socket
 import threading
 import time
-from collections import defaultdict
+import sys
+from concurrent.futures import ThreadPoolExecutor
 
-# Global counter without synchronization (demonstrates race condition)
-unsafe_counter = 0
-unsafe_counters = defaultdict(int)
+# Global counter without synchronization (naive implementation)
+naive_counter = 0
 
-# Global counter with synchronization (fixes race condition)
-safe_counter = 0
-safe_counters = defaultdict(int)
-safe_lock = threading.Lock()
-
-def unsafe_increment_counter(file_path):
-    """Increment counter without synchronization (race condition)"""
-    global unsafe_counter, unsafe_counters
-    
+def increment_naive_counter():
+    """Increment counter without synchronization (demonstrates race condition)"""
+    global naive_counter
     # Simulate some work
-    time.sleep(0.001)
-    
-    # This is NOT thread-safe - race condition occurs here
-    unsafe_counter += 1
-    unsafe_counters[file_path] += 1
-    
-    print(f"Unsafe: Counter={unsafe_counter}, {file_path}={unsafe_counters[file_path]}")
+    time.sleep(0.001)  # Small delay to increase chance of race condition
+    temp = naive_counter
+    time.sleep(0.001)  # Another delay to force race condition
+    naive_counter = temp + 1
 
-def safe_increment_counter(file_path):
-    """Increment counter with synchronization (no race condition)"""
-    global safe_counter, safe_counters
-    
-    # Simulate some work
-    time.sleep(0.001)
-    
-    # This IS thread-safe - uses lock to prevent race condition
-    with safe_lock:
-        safe_counter += 1
-        safe_counters[file_path] += 1
-        print(f"Safe: Counter={safe_counter}, {file_path}={safe_counters[file_path]}")
+def make_request_with_counter(server_host, server_port, filename, request_id):
+    """Make request and demonstrate race condition in counter"""
+    try:
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.settimeout(5)
+        client_socket.connect((server_host, server_port))
+        
+        request = f"GET /{filename} HTTP/1.1\r\nHost: {server_host}\r\n\r\n"
+        client_socket.send(request.encode())
+        
+        # Increment naive counter (demonstrates race condition)
+        increment_naive_counter()
+        
+        response = b""
+        while True:
+            data = client_socket.recv(1024)
+            if not data:
+                break
+            response += data
+        
+        client_socket.close()
+        return True
+        
+    except Exception as e:
+        print(f"Request {request_id} failed: {e}")
+        return False
 
-def demonstrate_race_condition():
-    """Demonstrate race condition with unsafe counter"""
-    print("=" * 60)
-    print("DEMONSTRATING RACE CONDITION (UNSAFE COUNTER)")
+def demonstrate_race_condition(server_host, server_port, filename, num_requests=20):
+    """Demonstrate race condition with concurrent requests"""
+    print(f"Demonstrating race condition with {num_requests} concurrent requests")
     print("=" * 60)
     
-    global unsafe_counter, unsafe_counters
-    unsafe_counter = 0
-    unsafe_counters.clear()
-    
-    threads = []
-    num_threads = 10
-    requests_per_thread = 5
+    global naive_counter
+    naive_counter = 0  # Reset counter
     
     start_time = time.time()
     
-    # Create threads that increment unsafe counter
-    for i in range(num_threads):
-        for j in range(requests_per_thread):
-            thread = threading.Thread(
-                target=unsafe_increment_counter,
-                args=(f"file_{i}.html",)
-            )
-            threads.append(thread)
-            thread.start()
-    
-    # Wait for all threads to complete
-    for thread in threads:
-        thread.join()
+    # Make concurrent requests
+    with ThreadPoolExecutor(max_workers=num_requests) as executor:
+        futures = [
+            executor.submit(make_request_with_counter, server_host, server_port, filename, i+1)
+            for i in range(num_requests)
+        ]
+        
+        # Wait for all requests to complete
+        results = [future.result() for future in futures]
     
     end_time = time.time()
+    total_time = end_time - start_time
     
-    print(f"\nUnsafe Counter Results:")
-    print(f"Expected total: {num_threads * requests_per_thread}")
-    print(f"Actual total: {unsafe_counter}")
-    print(f"Race condition occurred: {'YES' if unsafe_counter != num_threads * requests_per_thread else 'NO'}")
-    print(f"Time taken: {end_time - start_time:.3f}s")
+    successful_requests = sum(results)
     
-    return unsafe_counter
-
-def demonstrate_safe_counter():
-    """Demonstrate safe counter with synchronization"""
-    print("\n" + "=" * 60)
-    print("DEMONSTRATING THREAD-SAFE COUNTER (WITH LOCKS)")
-    print("=" * 60)
+    print(f"\nRace Condition Results:")
+    print(f"Expected counter value: {num_requests}")
+    print(f"Actual counter value: {naive_counter}")
+    print(f"Lost increments: {num_requests - naive_counter}")
+    print(f"Successful requests: {successful_requests}")
+    print(f"Total time: {total_time:.2f} seconds")
     
-    global safe_counter, safe_counters
-    safe_counter = 0
-    safe_counters.clear()
-    
-    threads = []
-    num_threads = 10
-    requests_per_thread = 5
-    
-    start_time = time.time()
-    
-    # Create threads that increment safe counter
-    for i in range(num_threads):
-        for j in range(requests_per_thread):
-            thread = threading.Thread(
-                target=safe_increment_counter,
-                args=(f"file_{i}.html",)
-            )
-            threads.append(thread)
-            thread.start()
-    
-    # Wait for all threads to complete
-    for thread in threads:
-        thread.join()
-    
-    end_time = time.time()
-    
-    print(f"\nSafe Counter Results:")
-    print(f"Expected total: {num_threads * requests_per_thread}")
-    print(f"Actual total: {safe_counter}")
-    print(f"Race condition occurred: {'YES' if safe_counter != num_threads * requests_per_thread else 'NO'}")
-    print(f"Time taken: {end_time - start_time:.3f}s")
-    
-    return safe_counter
+    if naive_counter < num_requests:
+        print(f"\n⚠️  RACE CONDITION DETECTED!")
+        print(f"   Expected: {num_requests}, Got: {naive_counter}")
+        print(f"   Lost {num_requests - naive_counter} increments due to race condition")
+    else:
+        print(f"\n✅ No race condition detected (lucky timing)")
 
 def main():
-    print("Race Condition Demonstration")
-    print("This script demonstrates the difference between unsafe and safe counter implementations")
-    print("in a multi-threaded environment.")
+    if len(sys.argv) < 2:
+        print("Usage: python race_condition_demo.py <server_host> [port] [filename]")
+        print("  server_host: server hostname")
+        print("  port: server port (default: 6789)")
+        print("  filename: file to request (default: hello.html)")
+        sys.exit(1)
     
-    # Run multiple iterations to increase chance of seeing race condition
-    for iteration in range(3):
-        print(f"\n{'='*80}")
-        print(f"ITERATION {iteration + 1}")
-        print(f"{'='*80}")
-        
-        unsafe_result = demonstrate_race_condition()
-        safe_result = demonstrate_safe_counter()
-        
-        print(f"\nComparison for iteration {iteration + 1}:")
-        print(f"Unsafe counter: {unsafe_result}")
-        print(f"Safe counter: {safe_result}")
-        print(f"Difference: {abs(unsafe_result - safe_result)}")
+    server_host = sys.argv[1]
+    server_port = int(sys.argv[2]) if len(sys.argv) > 2 else 6789
+    filename = sys.argv[3] if len(sys.argv) > 3 else 'hello.html'
     
-    print(f"\n{'='*80}")
-    print("CONCLUSION:")
-    print("- Unsafe counter may show race conditions (lost updates)")
-    print("- Safe counter with locks prevents race conditions")
-    print("- Locks ensure atomic operations but may reduce performance")
-    print("- This is why the HTTP server uses locks for request counters")
+    print(f"Race Condition Demonstration")
+    print(f"Server: {server_host}:{server_port}")
+    print(f"File: {filename}")
+    
+    # Run multiple tests to increase chance of seeing race condition
+    for test_num in range(3):
+        print(f"\n--- Test {test_num + 1} ---")
+        demonstrate_race_condition(server_host, server_port, filename, 20)
+        time.sleep(1)  # Brief pause between tests
 
 if __name__ == "__main__":
     main()
