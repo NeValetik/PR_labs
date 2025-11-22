@@ -20,7 +20,10 @@ import process from 'node:process';
  * @throws Error if an error occurs connecting to the server
  */
 async function simulationMain(): Promise<void> {
-    const serverUrl = process.argv[2] || 'http://localhost:8789';
+    const serverUrl = process.argv[2];
+    if (serverUrl === undefined || serverUrl === '') {
+        throw new Error('SERVER_URL is required');
+    }
     const players = 2;
     const tries = 100;
     const minDelayMilliseconds = 1000;
@@ -38,7 +41,13 @@ async function simulationMain(): Promise<void> {
     // wait for all the players to finish (unless one throws an exception)
     await Promise.all(playerPromises);
 
-    /** @param playerNumber player to simulate */
+    /**
+     * @param playerNumber player to simulate
+     * @param baseUrl base URL of the server
+     * @param size board dimensions
+     * @param size.row number of rows on the board
+     * @param size.col number of columns on the board
+     */
     async function player(playerNumber: number, baseUrl: string, size: { row: number, col: number }): Promise<void> {
         const playerId = `player${playerNumber}`;
         
@@ -77,17 +86,19 @@ async function simulationMain(): Promise<void> {
 
     /**
      * Get board size from the server by calling look endpoint
+     * @param baseUrl base URL of the server
+     * @returns promise that resolves to board dimensions
      */
     async function getBoardSize(baseUrl: string): Promise<{ row: number, col: number }> {
         const response = await httpGet(`${baseUrl}/look/temp`);
         const lines = response.split('\n');
         const sizeLine = lines[0];
-        if (!sizeLine) {
+        if (sizeLine === undefined || sizeLine === '') {
             throw new Error('Invalid board response: missing size line');
         }
         const parts = sizeLine.split('x');
-        const row = parseInt(parts[0] || '0', 10);
-        const col = parseInt(parts[1] || '0', 10);
+        const row = parseInt(parts[0] ?? '0', 10);
+        const col = parseInt(parts[1] ?? '0', 10);
         if (isNaN(row) || isNaN(col) || row <= 0 || col <= 0) {
             throw new Error(`Invalid board size: ${sizeLine}`);
         }
@@ -96,6 +107,8 @@ async function simulationMain(): Promise<void> {
 
     /**
      * Make an HTTP GET request
+     * @param url URL to fetch
+     * @returns promise that resolves to the response text
      */
     async function httpGet(url: string): Promise<string> {
         const response = await fetch(url);

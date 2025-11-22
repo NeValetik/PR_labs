@@ -11,7 +11,10 @@ export interface ICard {
 }
 
 export class Card implements ICard {
-  constructor(public value: string, public faceUp: boolean, public isBusy: boolean) {
+  public value: string;
+  public faceUp: boolean;
+  public isBusy: boolean;
+  public constructor(value: string, faceUp: boolean, isBusy: boolean) {
     this.value = value;
     this.faceUp = faceUp;
     this.isBusy = isBusy;

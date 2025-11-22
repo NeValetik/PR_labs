@@ -1,5 +1,6 @@
 export class Player {
-  constructor(public id: string) {
+  public id: string;
+  public constructor(id: string) {
     this.id = id;
   }
   public getId(): string {

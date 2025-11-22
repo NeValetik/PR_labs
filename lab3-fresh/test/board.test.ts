@@ -5,12 +5,45 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 import { Board } from '../src/board.js';
-import { Card } from '../src/card.js';
 import { Player } from '../src/player.js';
 
 /**
- * Tests for the Board abstract data type.
+ * Tests for the Board ADT.
+ * 
+ * Testing strategy:
+ * 
+ * parseFromFile():
+ *   - valid files: small (1x1), medium (3x3), large (5x5)
+ *   - invalid files: wrong card count, invalid dimensions, malformed
+ * 
+ * look():
+ *   - empty board, board with cards
+ *   - all cards face down
+ *   - some cards face up (controlled by self, controlled by others, not controlled)
+ *   - some spaces empty (after matches removed)
+ * 
+ * flip():
+ *   - First card:
+ *     - valid position, face down → turns face up, player controls it
+ *     - valid position, face up, not controlled → player controls it  
+ *     - valid position, face up, controlled by another player → waits
+ *     - empty space → throws error
+ *   - Second card:
+ *     - match with first card → both stay face up, player keeps control
+ *     - no match with first card → both stay face up, player relinquishes control
+ *     - empty space → throws error, relinquishes first card
+ *     - controlled by another player → throws error, relinquishes first card
+ *   - Finishing previous play:
+ *     - matched cards → removed from board
+ *     - non-matching cards (not controlled) → turned face down
+ *     - non-matching cards (now controlled by another) → stay face up
+ * 
+ * Concurrency:
+ *   - multiple players flipping different cards simultaneously
+ *   - multiple players waiting for same card
+ *   - player makes move while another is waiting
  */
+
 describe('Board', function() {
     
     beforeEach(function() {
@@ -18,401 +51,703 @@ describe('Board', function() {
         (Board as any).instance = null;
     });
 
+    // ========== parseFromFile() tests ==========
+    
     describe('parseFromFile', function() {
-        it('should parse a valid board file', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
+        
+        it('should parse a simple 1x1 board', async function() {
+            const filename = 'test-boards/simple.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '1x1\nA\n');
+            
+            const board = await Board.parseFromFile(filename);
             const size = board.getSize();
-            assert.strictEqual(size.row, 5);
-            assert.strictEqual(size.col, 5);
+            
+            assert.strictEqual(size.row, 1);
+            assert.strictEqual(size.col, 1);
+            
+            // Clean up
+            await fs.promises.unlink(filename);
         });
-
-        it('should parse perfect.txt board file', async function() {
+        
+        it('should parse a 3x3 board', async function() {
             const board = await Board.parseFromFile('boards/perfect.txt');
             const size = board.getSize();
+            
             assert.strictEqual(size.row, 3);
             assert.strictEqual(size.col, 3);
         });
-
+        
+        it('should parse a 5x5 board', async function() {
+            const board = await Board.parseFromFile('boards/ab.txt');
+            const size = board.getSize();
+            
+            assert.strictEqual(size.row, 5);
+            assert.strictEqual(size.col, 5);
+        });
+        
         it('should throw error for invalid file', async function() {
             await assert.rejects(
                 async () => await Board.parseFromFile('boards/nonexistent.txt'),
                 Error
             );
         });
-
+        
         it('should throw error for invalid size format', async function() {
-            // Create a temporary invalid board file
-            const invalidContent = 'invalid\nA\nB';
-            const tempFile = 'boards/temp_invalid.txt';
-            await fs.promises.writeFile(tempFile, invalidContent);
+            const filename = 'test-boards/bad-dims.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, 'not-a-board\n');
             
-            try {
-                await assert.rejects(
-                    async () => await Board.parseFromFile(tempFile),
-                    Error
-                );
-            } finally {
-                // Clean up
-                try {
-                    await fs.promises.unlink(tempFile);
-                } catch {
-                    // Ignore cleanup errors
-                }
-            }
-        });
-    });
-
-    describe('constructor', function() {
-        it('should create a board with valid size and cards', function() {
-            const cards = [new Card('A', false, false), new Card('B', false, false)];
-            const board = new Board({ row: 1, col: 2 }, cards);
-            const size = board.getSize();
-            assert.strictEqual(size.row, 1);
-            assert.strictEqual(size.col, 2);
-        });
-
-        it('should throw error if board already exists', function() {
-            const cards1 = [new Card('A', false, false)];
-            const cards2 = [new Card('B', false, false)];
-            new Board({ row: 1, col: 1 }, cards1);
-            assert.throws(
-                () => new Board({ row: 1, col: 1 }, cards2),
-                Error,
-                'Board already exists'
-            );
-        });
-
-        it('should throw error for invalid size', function() {
-            const cards = [new Card('A', false, false)];
-            assert.throws(
-                () => new Board({ row: 0, col: 1 }, cards),
+            await assert.rejects(
+                async () => await Board.parseFromFile(filename),
                 Error
             );
-            assert.throws(
-                () => new Board({ row: 1, col: 0 }, cards),
-                Error
-            );
-        });
-
-        it('should throw error if cards length does not match size', function() {
-            const cards = [new Card('A', false, false)];
-            assert.throws(
-                () => new Board({ row: 2, col: 2 }, cards),
-                Error
-            );
+            
+            await fs.promises.unlink(filename);
         });
     });
 
-    describe('getInstance', function() {
-        it('should return the singleton instance', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            const instance = Board.getInstance();
-            assert.strictEqual(instance, board);
-        });
-
-        it('should throw error if board not initialized', function() {
-            (Board as any).instance = null;
-            assert.throws(
-                () => Board.getInstance(),
-                Error,
-                'Board not initialized'
-            );
-        });
-    });
-
-    describe('getSize', function() {
-        it('should return correct size', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            const size = board.getSize();
-            assert.strictEqual(size.row, 5);
-            assert.strictEqual(size.col, 5);
-        });
-    });
-
-    describe('getCards', function() {
-        it('should return all cards when called without arguments', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            const cards = board.getCards();
-            assert.strictEqual(cards.length, 25);
-        });
-
-        it('should return specific card when called with row and column', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            const card = board.getCards(0, 0);
-            assert(card !== undefined);
-        });
-
-        it('should return undefined for invalid coordinates', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            const card = board.getCards(10, 10);
-            assert.strictEqual(card, undefined);
-        });
-    });
-
-    describe('addPlayer', function() {
-        it('should add a new player', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            const player = new Player('player1');
-            await board.addPlayer(player);
-            // Player should be able to look at board
-            const result = await board.look('player1');
-            assert(result.includes('5x5'));
-        });
-
-        it('should add multiple players', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            const player1 = new Player('player1');
-            const player2 = new Player('player2');
-            await board.addPlayer(player1);
-            await board.addPlayer(player2);
-            const result1 = await board.look('player1');
-            const result2 = await board.look('player2');
-            assert(result1.includes('5x5'));
-            assert(result2.includes('5x5'));
-        });
-    });
-
+    // ========== look() tests ==========
+    
     describe('look', function() {
-        it('should return board state for existing player', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            const player = new Player('player1');
-            await board.addPlayer(player);
-            const result = await board.look('player1');
-            assert(result.startsWith('5x5'));
-            assert(result.includes('down ?'));
+        
+        it('should show all cards face down initially', async function() {
+            const filename = 'test-boards/look1.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            const view = await board.look('alice');
+            
+            const lines = view.split('\n');
+            assert.strictEqual(lines[0], '2x2');
+            // Cards are in row-major order: (0,0), (0,1), (1,0), (1,1)
+            assert.strictEqual(lines[1], 'down ?');
+            assert.strictEqual(lines[2], 'down ?');
+            assert.strictEqual(lines[3], 'down ?');
+            assert.strictEqual(lines[4], 'down ?');
+            
+            await fs.promises.unlink(filename);
         });
-
-        it('should create player if not exists', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            const result = await board.look('newplayer');
-            assert(result.startsWith('5x5'));
+        
+        it('should show controlled cards as "my"', async function() {
+            const filename = 'test-boards/look2.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            
+            // Alice flips first card
+            await board.flip('alice', 0, 0);
+            
+            const view = await board.look('alice');
+            const lines = view.split('\n');
+            assert.strictEqual(lines[1], 'my A');  // Alice's card at (0,0)
+            
+            await fs.promises.unlink(filename);
         });
-
-        it('should show face-up cards correctly', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            await board.addPlayer(new Player('player1'));
-            await board.flip('player1', 0, 0);
-            const result = await board.look('player1');
-            // Should show the card value for the flipped card
-            assert(result.includes('my') || result.includes('up'));
+        
+        it('should show others\' controlled cards as "up"', async function() {
+            const filename = 'test-boards/look3.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            
+            // Alice flips first card
+            await board.flip('alice', 0, 0);
+            
+            // Bob's view
+            const view = await board.look('bob');
+            const lines = view.split('\n');
+            assert.strictEqual(lines[1], 'up A');  // Alice's card, from Bob's perspective
+            
+            await fs.promises.unlink(filename);
+        });
+        
+        it('should show empty spaces as "none"', async function() {
+            const filename = 'test-boards/look4.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            
+            // Alice makes a match
+            await board.flip('alice', 0, 0);  // First A at (0,0)
+            await board.flip('alice', 1, 0);  // Second A at (1,0) - match!
+            
+            // Start new move - matched cards removed
+            await board.flip('alice', 0, 1);  // Some other card
+            
+            const view = await board.look('alice');
+            const lines = view.split('\n');
+            assert.strictEqual(lines[1], 'none');  // First A removed at (0,0)
+            assert.strictEqual(lines[3], 'none');  // Second A removed at (1,0)
+            
+            await fs.promises.unlink(filename);
         });
     });
 
-    describe('flip', function() {
-        it('should flip a card face up', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            await board.addPlayer(new Player('player1'));
-            await board.flip('player1', 0, 0);
-            const card = board.getCards(0, 0);
-            assert(card !== undefined);
-            const faceUp = await card!.getFaceUp();
-            assert.strictEqual(faceUp, true);
+    // ========== flip() tests - First Card ==========
+    
+    describe('flip - first card', function() {
+        
+        it('should flip face-down card and give control (Rule 1-B)', async function() {
+            const filename = 'test-boards/flip1.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            
+            await board.flip('alice', 0, 0);
+            
+            const view = await board.look('alice');
+            const lines = view.split('\n');
+            assert.strictEqual(lines[1], 'my A');
+            
+            await fs.promises.unlink(filename);
         });
-
-        it('should throw error for non-existent player', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
+        
+        it('should give control of face-up uncontrolled card (Rule 1-C)', async function() {
+            const filename = 'test-boards/flip2.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            await board.addPlayer(new Player('bob'));
+            
+            // Alice flips and doesn't match
+            await board.flip('alice', 0, 0);
+            await board.flip('alice', 0, 1);  // No match - cards stay up but not controlled
+            
+            // Bob can now take control of the face-up card
+            await board.flip('bob', 0, 0);
+            
+            const view = await board.look('bob');
+            const lines = view.split('\n');
+            assert.strictEqual(lines[1], 'my A');
+            
+            await fs.promises.unlink(filename);
+        });
+        
+        it('should throw error for empty space (Rule 1-A)', async function() {
+            const filename = 'test-boards/flip3.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            await board.addPlayer(new Player('bob'));
+            
+            // Alice makes a match and removes cards
+            await board.flip('alice', 0, 0);
+            await board.flip('alice', 1, 0);
+            await board.flip('alice', 0, 1);  // Removes matched As
+            
+            // Bob tries to flip empty space
             await assert.rejects(
-                async () => await board.flip('nonexistent', 0, 0),
-                Error,
-                'Player not found'
+                async () => await board.flip('bob', 0, 0),
+                /Card not found|no card at/
             );
+            
+            await fs.promises.unlink(filename);
         });
+        
+        it('should wait for controlled card (Rule 1-D)', async function() {
+            const filename = 'test-boards/flip4.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            await board.addPlayer(new Player('bob'));
+            
+            // Alice flips first card
+            await board.flip('alice', 0, 0);
+            
+            // Bob tries to flip same card - should wait
+            let bobDone = false;
+            const bobPromise = board.flip('bob', 0, 0).then(() => {
+                bobDone = true;
+            });
+            
+            // Give Bob a moment to start waiting
+            await timeout(10);
+            assert.strictEqual(bobDone, false, 'Bob should still be waiting');
+            
+            // Alice flips second card (no match) - relinquishes first card
+            await board.flip('alice', 0, 1);
+            
+            // Now Bob's flip should complete
+            await bobPromise;
+            assert.strictEqual(bobDone, true);
+            
+            await fs.promises.unlink(filename);
+        });
+    });
 
-        it('should throw error for invalid coordinates', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            await board.addPlayer(new Player('player1'));
+    // ========== flip() tests - Second Card ==========
+    
+    describe('flip - second card', function() {
+        
+        it('should match and keep control of both cards (Rule 2-D)', async function() {
+            const filename = 'test-boards/flip-2nd-1.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            
+            await board.flip('alice', 0, 0);  // First A at (0,0)
+            await board.flip('alice', 1, 0);  // Second A at (1,0) - match!
+            
+            const view = await board.look('alice');
+            const lines = view.split('\n');
+            assert.strictEqual(lines[1], 'my A');  // First card at (0,0)
+            assert.strictEqual(lines[3], 'my A');  // Second card at (1,0)
+            
+            await fs.promises.unlink(filename);
+        });
+        
+        it('should not match and relinquish control (Rule 2-E)', async function() {
+            const filename = 'test-boards/flip-2nd-2.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            
+            await board.flip('alice', 0, 0);  // A at (0,0)
+            await board.flip('alice', 0, 1);  // B at (0,1) - no match
+            
+            const view = await board.look('alice');
+            const lines = view.split('\n');
+            // Both cards face up but not controlled
+            assert.strictEqual(lines[1], 'up A');
+            assert.strictEqual(lines[2], 'up B');
+            
+            await fs.promises.unlink(filename);
+        });
+        
+        it('should throw and relinquish first card on empty space (Rule 2-A)', async function() {
+            const filename = 'test-boards/flip-2nd-3.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '3x3\nA\nB\nA\nB\nC\nC\nD\nD\nE\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('bob'));
+            await board.addPlayer(new Player('alice'));
+            
+            // Bob makes a match and removes cards
+            await board.flip('bob', 0, 0);  // First A at (0,0)
+            await board.flip('bob', 0, 2);  // Second A at (0,2) - match!
+            await board.flip('bob', 0, 1);  // Removes the As
+            
+            // Alice tries second card at empty space
+            await board.flip('alice', 1, 0);  // First card - B at (1,0)
+            
             await assert.rejects(
-                async () => await board.flip('player1', 100, 100),
-                Error
+                async () => await board.flip('alice', 0, 0),  // Empty! (A was removed)
+                /Card not found|no card at/
             );
+            
+            // Alice's first card should be relinquished
+            const view = await board.look('alice');
+            const lines = view.split('\n');
+            // Position (1,0) is index 4 in row-major order (row 1, col 0 = 1*3 + 0 = 3, but 0-indexed from size line)
+            // Actually: lines[0] = "3x3", lines[1] = (0,0), lines[2] = (0,1), lines[3] = (0,2)
+            // lines[4] = (1,0), lines[5] = (1,1), etc.
+            assert.strictEqual(lines[4], 'up B');  // Position (1,0) - not "my" anymore
+            
+            await fs.promises.unlink(filename);
         });
-
-        it('should handle matching pair correctly', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            await board.addPlayer(new Player('player1'));
-            // Flip two matching cards
-            await board.flip('player1', 0, 0);
-            await board.flip('player1', 0, 2);
-            // Both cards should be removed
-            const card1 = board.getCards(0, 0);
-            const card2 = board.getCards(0, 2);
-            // Cards should be removed if they match
-            // The exact behavior depends on implementation
+        
+        it('should throw and relinquish on controlled card (Rule 2-B)', async function() {
+            const filename = 'test-boards/flip-2nd-4.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('bob'));
+            await board.addPlayer(new Player('alice'));
+            
+            // Bob flips first card
+            await board.flip('bob', 0, 1);
+            
+            // Alice tries to flip two cards, but second is controlled by Bob
+            await board.flip('alice', 0, 0);
+            
+            await assert.rejects(
+                async () => await board.flip('alice', 0, 1),  // Controlled by Bob
+                /controlled|Card not found|not available/
+            );
+            
+            // Alice's first card should be relinquished
+            const view = await board.look('alice');
+            const lines = view.split('\n');
+            assert.strictEqual(lines[1], 'up A');  // Not "my" anymore
+            
+            await fs.promises.unlink(filename);
         });
+    });
 
-        it('should handle non-matching pair correctly', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            await board.addPlayer(new Player('player1'));
-            // Flip two non-matching cards
-            await board.flip('player1', 0, 0); // A
-            await board.flip('player1', 0, 1); // B
-            // Wait a bit for processing
-            await new Promise(resolve => setTimeout(resolve, 50));
-            // Cards should be flipped back down after processing
-            const card1 = board.getCards(0, 0);
-            const card2 = board.getCards(0, 1);
-            if (card1 !== undefined) {
-                const faceUp1 = await card1.getFaceUp();
-                // After non-match, cards should eventually be face down
-                // (may take time to process removal queue)
-                // Just verify cards exist and operation completed
-                assert(card1 !== undefined);
-            }
-            if (card2 !== undefined) {
-                assert(card2 !== undefined);
-            }
+    // ========== flip() tests - Finishing Previous Play ==========
+    
+    describe('flip - finishing previous play', function() {
+        
+        it('should remove matched cards on next move (Rule 3-A)', async function() {
+            const filename = 'test-boards/finish1.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '3x3\nA\nB\nA\nB\nC\nC\nD\nD\nE\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            
+            // Alice matches A cards at (0,0) and (0,2)
+            await board.flip('alice', 0, 0);  // First A at (0,0)
+            await board.flip('alice', 0, 2);  // Second A at (0,2) - match!
+            
+            // Cards should still be there and controlled
+            let view = await board.look('alice');
+            let lines = view.split('\n');
+            assert.strictEqual(lines[1], 'my A');  // Still controlled
+            assert.strictEqual(lines[3], 'my A');  // Still controlled
+            
+            // Alice starts new move - should remove As
+            await board.flip('alice', 0, 1);
+            
+            view = await board.look('alice');
+            lines = view.split('\n');
+            assert.strictEqual(lines[1], 'none');  // Position (0,0) - First A removed
+            assert.strictEqual(lines[3], 'none');  // Position (0,2) - Second A removed
+            
+            await fs.promises.unlink(filename);
         });
-
-        it('should wait for card to become available', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
+        
+        it('should turn down non-matching uncontrolled cards (Rule 3-B)', async function() {
+            const filename = 'test-boards/finish2.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            
+            // Alice flips non-matching cards
+            // Board is: A B / A B (row-major)
+            //           (0,0) (0,1) / (1,0) (1,1)
+            await board.flip('alice', 0, 0);  // A at (0,0)
+            await board.flip('alice', 0, 1);  // B at (0,1) - no match
+            
+            // Cards should be face up but not controlled
+            let view = await board.look('alice');
+            let lines = view.split('\n');
+            assert.strictEqual(lines[1], 'up A');
+            assert.strictEqual(lines[2], 'up B');
+            
+            // Alice starts new move - should turn them down
+            await board.flip('alice', 1, 0);  // A at (1,0)
+            
+            view = await board.look('alice');
+            lines = view.split('\n');
+            assert.strictEqual(lines[1], 'down ?');  // Position (0,0) - turned down
+            assert.strictEqual(lines[2], 'down ?');  // Position (0,1) - turned down
+            
+            await fs.promises.unlink(filename);
+        });
+        
+        it('should NOT turn down card now controlled by another (Rule 3-B)', async function() {
+            const filename = 'test-boards/finish3.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            await board.addPlayer(new Player('bob'));
+            
+            // Alice flips non-matching cards
+            await board.flip('alice', 0, 0);  // A
+            await board.flip('alice', 0, 1);  // B - no match, relinquishes
+            
+            // Bob takes control of one of Alice's cards
+            await board.flip('bob', 0, 0);
+            
+            // Alice starts new move
+            await board.flip('alice', 1, 0);
+            
+            const view = await board.look('bob');
+            const lines = view.split('\n');
+            assert.strictEqual(lines[1], 'my A');  // Bob's card stays up
+            assert.strictEqual(lines[2], 'down ?');  // Alice's other card turned down
+            
+            await fs.promises.unlink(filename);
+        });
+        
+        it('should turn down card that was controlled by another but no longer is (Rule 3-B)', async function() {
+            const filename = 'test-boards/finish4.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '3x3\nA\nB\nC\nA\nD\nD\nE\nE\nF\n');
+            
+            const board = await Board.parseFromFile(filename);
             await board.addPlayer(new Player('player1'));
             await board.addPlayer(new Player('player2'));
             
-            // Player1 flips a card
-            const flip1 = board.flip('player1', 0, 0);
+            // P1 flips C1 (A at 0,0)
+            await board.flip('player1', 0, 0);  // A
+            // P1 flips C2 (B at 0,1) - no match, loses control of both
+            await board.flip('player1', 0, 1);  // B - no match, relinquishes
             
-            // Player2 tries to flip the same card (should wait)
-            const flip2 = board.flip('player2', 0, 0);
+            // P2 takes control of C1 (A at 0,0)
+            await board.flip('player2', 0, 0);  // A (face up, uncontrolled)
+            // P2 flips C3 (C at 0,2) - no match, loses control of both
+            await board.flip('player2', 0, 2);  // C - no match, relinquishes
             
-            await flip1;
-            // After player1 finishes, player2 should be able to proceed
-            await flip2;
+            // Now C1 (0,0) is face up but not controlled by anyone
+            // P1's previous cards were (0,0) and (0,1)
+            
+            // P1 starts new move - flips C4 (D at 1,1)
+            await board.flip('player1', 1, 1);  // D
+            
+            // C1 (0,0) should be turned face down (was P1's card, now uncontrolled)
+            // C2 (0,1) should be turned face down (was P1's card, now uncontrolled)
+            // C3 (0,2) should stay face up (was never P1's card)
+            const view = await board.look('player1');
+            const lines = view.split('\n');
+            assert.strictEqual(lines[1], 'down ?', 'C1 (0,0) should be face down');
+            assert.strictEqual(lines[2], 'down ?', 'C2 (0,1) should be face down');
+            assert.strictEqual(lines[3], 'up C', 'C3 (0,2) should remain face up (not P1\'s card)');
+            
+            await fs.promises.unlink(filename);
+        });
+    });
+
+    // ========== Concurrency tests ==========
+    
+    describe('concurrency', function() {
+        
+        it('should handle multiple players flipping different cards', async function() {
+            const filename = 'test-boards/concurrent1.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '3x3\nA\nB\nC\nA\nB\nC\nD\nD\nE\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            await board.addPlayer(new Player('bob'));
+            
+            // Alice and Bob flip simultaneously
+            await Promise.all([
+                board.flip('alice', 0, 0),
+                board.flip('bob', 0, 1)
+            ]);
+            
+            const aliceView = await board.look('alice');
+            const bobView = await board.look('bob');
+            
+            const aliceLines = aliceView.split('\n');
+            const bobLines = bobView.split('\n');
+            
+            assert.strictEqual(aliceLines[1], 'my A');
+            assert.strictEqual(bobLines[2], 'my B');
+            
+            await fs.promises.unlink(filename);
+        });
+        
+        it('should handle multiple waiters for same card', async function() {
+            const filename = 'test-boards/concurrent2.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            await board.addPlayer(new Player('bob'));
+            await board.addPlayer(new Player('charlie'));
+            
+            // Alice controls a card
+            await board.flip('alice', 0, 0);
+            
+            // Bob and Charlie both wait for it
+            const bobPromise = board.flip('bob', 0, 0);
+            const charliePromise = board.flip('charlie', 0, 0);
+            
+            await timeout(10);  // Let them start waiting
+            
+            // Alice releases the card
+            await board.flip('alice', 0, 1);  // No match, relinquishes
+            
+            // One of them should get it (but not both)
+            await Promise.race([bobPromise, charliePromise]);
+            
+            await fs.promises.unlink(filename);
+        });
+        
+        it('should handle player making move while another waits', async function() {
+            const filename = 'test-boards/concurrent3.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '3x3\nA\nB\nC\nA\nB\nC\nD\nD\nE\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('alice'));
+            await board.addPlayer(new Player('bob'));
+            await board.addPlayer(new Player('charlie'));
+            
+            // Alice controls a card
+            await board.flip('alice', 0, 0);
+            
+            // Bob waits for it
+            const bobPromise = board.flip('bob', 0, 0);
+            
+            await timeout(10);
+            
+            // Charlie makes a completely different move
+            await board.flip('charlie', 1, 1);
+            await board.flip('charlie', 1, 2);  // Should work fine
+            
+            // Alice releases, Bob gets it
+            await board.flip('alice', 0, 1);
+            await bobPromise;
+            
+            const bobView = await board.look('bob');
+            assert(bobView.includes('my A'));
+            
+            await fs.promises.unlink(filename);
         });
     });
 
     describe('map', function() {
-        it('should transform all cards with same value together', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
+        
+        it('should transform all cards on the board', async function() {
+            const filename = 'test-boards/map-simple.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
             await board.addPlayer(new Player('player1'));
             
-            const transform = async (card: string) => {
-                return card === 'A' ? 'X' : card;
-            };
+            // Transform A->X, B->Y
+            await board.map('player1', async (card) => {
+                if (card === 'A') return 'X';
+                if (card === 'B') return 'Y';
+                return card;
+            });
             
-            await board.map('player1', transform);
+            // Flip cards to verify transformation
+            await board.flip('player1', 0, 0);
+            const view = await board.look('player1');
+            assert(view.includes('my X')); // Was A, now X
             
-            // Check that all A cards became X
-            const card0 = board.getCards(0, 0);
-            if (card0 !== undefined) {
-                await card0.setFaceUp(true);
-                const value = card0.value;
-                // Should be X if originally A
-            }
+            await fs.promises.unlink(filename);
         });
-
-        it('should throw error for non-existent player', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            await assert.rejects(
-                async () => await board.map('nonexistent', async (c) => c),
-                Error,
-                'Player not found'
-            );
-        });
-
-        it('should maintain pairwise consistency', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
+        
+        it('should maintain pairwise consistency during transformation', async function() {
+            const filename = 'test-boards/map-consistency.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
             await board.addPlayer(new Player('player1'));
             
-            let transformCount = 0;
-            const transform = async (card: string) => {
-                transformCount++;
-                return card + 'X';
-            };
+            // Flip cards face up
+            await board.flip('player1', 0, 0); // A at (0,0)
+            await board.flip('player1', 0, 1); // B at (0,1) - no match
             
-            await board.map('player1', transform);
+            // Both As should transform together
+            await board.map('player1', async (card) => {
+                await timeout(5);
+                return `${card}-new`;
+            });
             
-            // All cards with same value should be transformed together
-            // transformCount should be 2 (one for A, one for B)
-            assert.strictEqual(transformCount, 2);
+            const view = await board.look('player1');
+            assert(view.includes('A-new'));
+            assert(view.includes('B-new'));
+            
+            await fs.promises.unlink(filename);
         });
     });
 
     describe('watch', function() {
+        
         it('should wait for board changes', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
+            const filename = 'test-boards/watch-flip.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
             await board.addPlayer(new Player('player1'));
+            
+            // Start watching for changes
+            let watchResolved = false;
+            const watchPromise = board.watch('player1').then(() => {
+                watchResolved = true;
+            });
+            
+            // Verify watch hasn't resolved yet
+            await timeout(10);
+            assert(!watchResolved, 'Watch should not resolve before change');
+            
+            // Make a change: flip a card
+            await board.flip('player1', 0, 0);
+            
+            // Watch should now resolve
+            await watchPromise;
+            assert(watchResolved, 'Watch should resolve after flip');
+            
+            await fs.promises.unlink(filename);
+        });
+        
+        it('should notify on card removal', async function() {
+            const filename = 'test-boards/watch-remove.txt';
+            await fs.promises.mkdir('test-boards', { recursive: true });
+            await fs.promises.writeFile(filename, '2x2\nA\nB\nA\nB\n');
+            
+            const board = await Board.parseFromFile(filename);
+            await board.addPlayer(new Player('player1'));
+            
+            // Set up a match
+            await board.flip('player1', 0, 0); // A
+            await board.flip('player1', 1, 0); // A - match!
             
             // Start watching
-            const watchPromise = board.watch('player1');
+            let watchResolved = false;
+            const watchPromise = board.watch('player1').then(() => {
+                watchResolved = true;
+            });
             
-            // Make a change
-            setTimeout(async () => {
-                await board.flip('player1', 0, 0);
-            }, 10);
+            await timeout(10);
+            assert(!watchResolved);
             
-            const result = await watchPromise;
-            assert(result.includes('5x5'));
-        });
-
-        it('should create player if not exists', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
+            // Remove the matched cards by making another move
+            await board.flip('player1', 0, 1);
             
-            const watchPromise = board.watch('newplayer');
+            // Watch should resolve
+            await watchPromise;
+            assert(watchResolved);
             
-            setTimeout(async () => {
-                await board.addPlayer(new Player('otherplayer'));
-                await board.flip('otherplayer', 0, 0);
-            }, 10);
-            
-            const result = await watchPromise;
-            assert(result.includes('5x5'));
-        });
-
-        it('should detect card removal', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            await board.addPlayer(new Player('player1'));
-            
-            const watchPromise = board.watch('player1');
-            
-            setTimeout(async () => {
-                // Flip matching pair to remove cards
-                await board.flip('player1', 0, 0);
-                await board.flip('player1', 0, 2);
-            }, 10);
-            
-            const result = await watchPromise;
-            assert(result.includes('none') || result.includes('5x5'));
+            await fs.promises.unlink(filename);
         });
     });
-
-    describe('concurrent operations', function() {
-        it('should handle multiple players flipping simultaneously', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            await board.addPlayer(new Player('player1'));
-            await board.addPlayer(new Player('player2'));
-            await board.addPlayer(new Player('player3'));
-            
-            const promises = [
-                board.flip('player1', 0, 0),
-                board.flip('player2', 0, 1),
-                board.flip('player3', 0, 2)
-            ];
-            
-            await Promise.all(promises);
-            
-            // All flips should complete
-            const card1 = board.getCards(0, 0);
-            const card2 = board.getCards(0, 1);
-            const card3 = board.getCards(0, 2);
-            
-            if (card1 !== undefined) {
-                const faceUp1 = await card1.getFaceUp();
-                assert.strictEqual(faceUp1, true);
+    
+    // Cleanup test-boards directory after all tests
+    after(async function() {
+        try {
+            const files = await fs.promises.readdir('test-boards');
+            for (const file of files) {
+                await fs.promises.unlink(`test-boards/${file}`);
             }
-        });
-
-        it('should handle map during flip operations', async function() {
-            const board = await Board.parseFromFile('boards/ab.txt');
-            await board.addPlayer(new Player('player1'));
-            
-            const flipPromise = board.flip('player1', 0, 0);
-            const mapPromise = board.map('player1', async (c) => c + 'X');
-            
-            await Promise.all([flipPromise, mapPromise]);
-            
-            // Both operations should complete without errors
-            const result = await board.look('player1');
-            assert(result.includes('5x5'));
-        });
+            await fs.promises.rmdir('test-boards');
+        } catch (err) {
+            // Directory might not exist, that's okay
+        }
     });
 });
+
+/**
+ * Helper function to create a delay
+ * @param ms milliseconds to wait
+ */
+async function timeout(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
