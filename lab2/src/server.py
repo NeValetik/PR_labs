@@ -28,13 +28,11 @@ def check_rate_limit(client_ip):
     current_time = time.time()
     
     with rate_limit_lock:
-        # Clean old timestamps (older than RATE_LIMIT_WINDOW seconds)
         rate_limit_data[client_ip] = [
             timestamp for timestamp in rate_limit_data[client_ip]
             if current_time - timestamp < RATE_LIMIT_WINDOW
         ]
         
-        # Check if under rate limit
         if len(rate_limit_data[client_ip]) < RATE_LIMIT_REQUESTS:
             rate_limit_data[client_ip].append(current_time)
             return True
@@ -67,7 +65,6 @@ def generate_directory_listing(path, files, current_url):
     <h1>Directory listing for /{path}</h1>
     <ul>"""
     
-    # Add parent directory link if not at root
     if path and path != '.':
         parent_url = '/'.join(current_url.rstrip('/').split('/')[:-1])
         if parent_url:
@@ -204,8 +201,6 @@ def handle_request(connection_socket, addr):
         connection_socket.close()
 
 serverSocket = socket(AF_INET, SOCK_STREAM)
-#Prepare a sever socket
-#Fill in start
 serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 try:
     serverSocket.bind(('0.0.0.0', 6789))
@@ -223,21 +218,18 @@ except OSError as e:
     except OSError as e2:
         print(f"Error binding to port 8080: {e2}")
         sys.exit(1)
-#Fill in end
 
 print("Multithreaded server ready to serve...")
 print("Features: Request counters, Rate limiting (5 req/sec), 1s delay simulation")
 
 while True:
-    #Establish the connection
     print('Ready to serve...')
-    connectionSocket, addr = serverSocket.accept()  #Fill in start #Fill in end
+    connectionSocket, addr = serverSocket.accept()
     print(f"Connection from {addr}")
     
-    # Create a new thread to handle the request
     thread = threading.Thread(target=handle_request, args=(connectionSocket, addr))
-    thread.daemon = True  # Allow main thread to exit even if threads are running
+    thread.daemon = True
     thread.start()
 
 serverSocket.close()
-sys.exit()#Terminate the program after sending the corresponding data
+sys.exit()
