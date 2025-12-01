@@ -24,10 +24,10 @@ async function simulationMain(): Promise<void> {
     if (serverUrl === undefined || serverUrl === '') {
         throw new Error('SERVER_URL is required');
     }
-    const players = 2;
-    const tries = 100;
-    const minDelayMilliseconds = 1000;
-    const maxDelayMilliseconds = 2000;
+    const players = 4;
+    const tries = 1000;
+    const minDelayMilliseconds = 1;
+    const maxDelayMilliseconds = 10;
 
     // Get board size from the server
     const boardSize = await getBoardSize(serverUrl);

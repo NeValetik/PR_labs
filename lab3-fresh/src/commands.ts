@@ -23,7 +23,6 @@ import { Player } from './player.js';
  */
 export async function look(board: Board, playerId: string): Promise<string> {
     const boardstr = await board.look(playerId);
-    // console.log(boardstr);
     return boardstr;
     // implement with glue code only, at most three lines
 }
