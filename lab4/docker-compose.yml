@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  leader:
+    build: .
+    container_name: kv-store-leader
+    ports:
+      - "8000:8000"
+    environment:
+      - LEADER_PORT=8000
+      - FOLLOWERS=http://follower1:8001,http://follower2:8002,http://follower3:8003,http://follower4:8004,http://follower5:8005
+      - WRITE_QUORUM=3
+      - MIN_DELAY_MS=0
+      - MAX_DELAY_MS=1000
+      - WORKERS=1
+    command: python leader.py
+    networks:
+      - kv-network
+
+  follower1:
+    build: .
+    container_name: kv-store-follower1
+    ports:
+      - "8001:8001"
+    environment:
+      - FOLLOWER_PORT=8001
+      - FOLLOWER_ID=follower1
+      - MIN_DELAY_MS=0
+      - MAX_DELAY_MS=1000
+      - WORKERS=1
+    command: python follower.py
+    networks:
+      - kv-network
+
+  follower2:
+    build: .
+    container_name: kv-store-follower2
+    ports:
+      - "8002:8002"
+    environment:
+      - FOLLOWER_PORT=8002
+      - FOLLOWER_ID=follower2
+      - MIN_DELAY_MS=0
+      - MAX_DELAY_MS=1000
+      - WORKERS=1
+    command: python follower.py
+    networks:
+      - kv-network
+
+  follower3:
+    build: .
+    container_name: kv-store-follower3
+    ports:
+      - "8003:8003"
+    environment:
+      - FOLLOWER_PORT=8003
+      - FOLLOWER_ID=follower3
+      - MIN_DELAY_MS=0
+      - MAX_DELAY_MS=1000
+      - WORKERS=1
+    command: python follower.py
+    networks:
+      - kv-network
+
+  follower4:
+    build: .
+    container_name: kv-store-follower4
+    ports:
+      - "8004:8004"
+    environment:
+      - FOLLOWER_PORT=8004
+      - FOLLOWER_ID=follower4
+      - MIN_DELAY_MS=0
+      - MAX_DELAY_MS=1000
+      - WORKERS=1
+    command: python follower.py
+    networks:
+      - kv-network
+
+  follower5:
+    build: .
+    container_name: kv-store-follower5
+    ports:
+      - "8005:8005"
+    environment:
+      - FOLLOWER_PORT=8005
+      - FOLLOWER_ID=follower5
+      - MIN_DELAY_MS=0
+      - MAX_DELAY_MS=1000
+      - WORKERS=1
+    command: python follower.py
+    networks:
+      - kv-network
+
+networks:
+  kv-network:
+    driver: bridge
+
